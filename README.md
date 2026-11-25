@@ -7,7 +7,8 @@ pela aplicação: ele serviu apenas como referência das measures, visuais e pal
 ## Arquivos
 
 - `preparar_dados.py` — lê o CSV em chunks e grava `data/jogos.parquet`.
-- `app.py` — dashboard com 4 telas, filtros globais, clique nos gráficos e detalhes.
+- `app.py` — dashboard com 2 telas (**Exploração** e **Informações**), filtros
+  globais e clique que comanda todos os painéis.
 - `requirements.txt` — dependências.
 - `plano.txt` — plano original (mantido como referência).
 
@@ -43,9 +44,9 @@ export JOGOS_CSV=/caminho/para/games_march2025_cleaned.csv
 
 | Power BI | Streamlit |
 |---|---|
-| Página "Página 1" — dispersão de publishers | Tela **Visão competitiva** |
-| Página "Estratégia e composição do portfólio" — barras + linha | Tela **Portfólio** |
-| Página "Mercado, satisfação e jogadores" — 2 dispersões | Tela **Mercado e jogadores** |
+| Página "Página 1" — dispersão de publishers | Tela **Exploração** — visão competitiva |
+| Página "Estratégia e composição do portfólio" — barras + linha | Tela **Informações** — composição + evolução |
+| Página "Mercado, satisfação e jogadores" — 2 dispersões | Tela **Informações** — mapa de gêneros e jogos |
 | Slicer "Visão por" (Publisher/Desenvolvedor) | Radio na sidebar, aplicado a todas as telas |
 | Medidas DAX | Recalculadas em pandas (ver abaixo) |
 | Tema `EstudioCompetitivo.json` | CSS + template Plotly com a mesma paleta |
@@ -60,10 +61,11 @@ de proprietários da Steam). A popularidade de uma entidade é a média das
 popularidades dos seus jogos — não a soma nem o máximo.
 
 > Diferença intencional em relação ao `.pbix`: a measure original usa
-> `MEDIAN(...)`. Aqui ela foi trocada por `mean()` a pedido, para que um título
-> muito popular (ex.: War Thunder, 35 M) não seja "escondido" pela quantidade de
-> jogos menores da mesma editora. Na visão Publisher, `Gaijin Network Ltd`
-> passa de 3,5 M (mediana) para ~7,7 M (média dos 6 jogos).
+> `MEDIAN(...)`. Aqui ela foi trocada por `mean()` (média simples) a pedido.
+> A média inclui **todos** os jogos da entidade — inclusive o War Thunder
+> (35 M), que é o maior hit da Gaijin e não é removido nem "suavizado". Na visão
+> Publisher, `Gaijin Network Ltd` tem 6 jogos e popularidade média de
+> 7.733.333 (a mediana do `.pbix` era 3,5 M).
 
 Validação das medidas inalteradas: Qtd Jogos (89.618), % positivas (85,82%),
 Qtd Reviews (117.928.014), Tempo Médio (1.285,7 min = 21,4 h) batem exatamente com o
@@ -76,12 +78,40 @@ divergente do CSV); aqui usamos os dólares do CSV, então o Preço Médio exibi
 - A sidebar permite **escolher publishers ou developers específicos** para
   analisar num único seletor: basta digitar para buscar entre as ~50 mil /
   60 mil entidades. Sem busca, as maiores aparecem primeiro. Trocar "Visão
-  por" limpa a seleção, já que os nomes são conjuntos diferentes. As entidades
-  escolhidas filtram todas as telas e ganham prioridade nos gráficos (mesmo
-  quando não estão no topo por reviews/jogos).
+  por" limpa a seleção e o clique, já que os nomes são conjuntos diferentes.
 - Há também filtro por **gênero** e por **categoria** (40 valores, como
   `Single-player`, `Co-op`, `Steam Achievements`). Ambos vêm de listas, então
-  um jogo com vários rótulos é contado em cada um.
+  um jogo com vários rótulos é contado em cada um dos filtros.
+- A tela **Exploração** traz a visão competitiva. Clicar em um ponto salva o
+  pub/dev em `st.session_state` e abre automaticamente a tela **Informações**.
+- A tela **Informações** mostra, juntos: a **pizza de composição**, a
+  **evolução dos lançamentos**, o **mapa de desempenho dos gêneros**, a
+  dispersão **popularidade/satisfação dos jogos**, os 6 KPIs e a tabela de
+  **dados brutos** (sem limite de jogos).
+- Sem seleção nem filtro, composição e evolução são **gerais** (toda a base).
+  Com qualquer filtro ou seleção, passam a mostrar o grupo em análise: pub/dev,
+  gênero, categoria, ano ou jogo. Se o foco for um **jogo**, cada painel mostra
+  somente aquele título (a linha vira um único ponto, o ano de lançamento).
+- A pizza usa o **gênero principal** de cada jogo, de forma que cada título
+  entra uma única vez e as fatias somam 100% do grupo. Os 8 gêneros mais comuns
+  têm fatia própria; o resto vai para "Outros". Um expander explica esses
+  limites na própria tela.
+- O parquet já exclui os campos de texto longo (`detailed_description`,
+  `about_the_game`, `short_description`, screenshots etc.); a tabela bruta só
+  traz as colunas analíticas, sem descrições e histórias.
+- Clique com o **botão esquerdo** em um ponto abre o foco (jogo, publisher ou
+  desenvolvedor). Para remover um outlier ou um pub/dev inteiro, há **dois
+  caminhos**, com o mesmo efeito: todos os jogos do grupo saem dos gráficos,
+  KPIs e da tabela.
+  1. ligar o switch **Modo exclusão** na sidebar e clicar no jogo/pub/dev;
+  2. clicar no ponto e usar o botão **Excluir … em foco**.
+- Excluir um publisher ou desenvolvedor remove **todos** os jogos em que ele
+  aparece, incluindo suas linhas nas tabelas longas usadas pelos filtros.
+- A sidebar mostra os jogos e pubs/devs excluídos, a quantidade de jogos fora
+  do recorte e oferece **Restaurar exclusões**. A exclusão vale apenas para a
+  sessão atual; o parquet não é alterado.
+- O clique comanda todos os painéis — não há mais checkbox de cross-filter.
+  **Limpar clique** volta ao recorte da sidebar.
 - Em **Visão competitiva** e no mapa de gêneros, o diâmetro das bolhas usa
   **escala logarítmica ancorada no menor valor exibido** (não no zero), com
   limites compartilhados por todos os grupos. Ancorar no zero deixava as
@@ -93,21 +123,14 @@ divergente do CSV); aqui usamos os dólares do CSV, então o Preço Médio exibi
   fica concentrado entre 80% e 99%, a escala é linear com recorte nos
   percentis 5 e 95 — sem isso quase todas as bolhas ficariam do mesmo tamanho.
 - O tempo médio de jogo é exibido em **horas** nos KPIs, tooltips e eixos.
-- Os demais filtros da sidebar (ano, preço, mínimo de reviews, mínimo de %
-  positivas e busca por nome) afetam todas as telas.
+- Os demais filtros da sidebar (ano, gênero, categoria, preço, mínimo de
+  reviews, mínimo de % positivas e busca por nome) afetam todas as telas.
 - O slider de reviews usa escala logarítmica para permitir selecionar desde
   poucas dezenas até milhões de avaliações.
-- Clicar em um ponto/barra salva a seleção em `st.session_state` e abre a tela
-  **Detalhes**, com 6 KPIs e a lista de **todos** os jogos da seleção.
-- A tela **Portfólio** traz um expander explicando como as barras e a linha são
-  calculadas e quais são os cortes (top 12 entidades, top 8 gêneros, "Outros").
-- O checkbox **Aplicar clique como filtro nos gráficos** liga/desliga o
-  cross-filter global por clique.
-- **Limpar seleção** volta à visão filtrada.
 
 > Nota: a navegação usa `st.segmented_control` em vez de `st.tabs` porque o
 > Streamlit não permite trocar de aba programaticamente; assim o clique no
-> gráfico consegue abrir de fato a tela "Detalhes".
+> gráfico consegue abrir de fato a tela "Informações".
 
 ## Dados
 
