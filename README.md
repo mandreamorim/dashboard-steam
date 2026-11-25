@@ -7,8 +7,8 @@ pela aplicação: ele serviu apenas como referência das measures, visuais e pal
 ## Arquivos
 
 - `preparar_dados.py` — lê o CSV em chunks e grava `data/jogos.parquet`.
-- `app.py` — dashboard com 2 telas (**Exploração** e **Informações**), filtros
-  globais e clique que comanda todos os painéis.
+- `app.py` — dashboard em **uma única tela**, com filtros globais e clique
+  que comanda todos os painéis.
 - `requirements.txt` — dependências.
 - `plano.txt` — plano original (mantido como referência).
 
@@ -44,10 +44,10 @@ export JOGOS_CSV=/caminho/para/games_march2025_cleaned.csv
 
 | Power BI | Streamlit |
 |---|---|
-| Página "Página 1" — dispersão de publishers | Tela **Exploração** — visão competitiva |
-| Página "Estratégia e composição do portfólio" — barras + linha | Tela **Informações** — composição + evolução |
-| Página "Mercado, satisfação e jogadores" — 2 dispersões | Tela **Informações** — mapa de gêneros e jogos |
-| Slicer "Visão por" (Publisher/Desenvolvedor) | Radio na sidebar, aplicado a todas as telas |
+| Página "Página 1" — dispersão de publishers | Visão competitiva (topo da tela única) |
+| Página "Estratégia e composição do portfólio" — barras + linha | Pizza de composição + evolução dos lançamentos |
+| Página "Mercado, satisfação e jogadores" — 2 dispersões | Mapa de gêneros e jogos |
+| Slicer "Visão por" (Publisher/Desenvolvedor) | Radio na sidebar, aplicado a todos os painéis |
 | Medidas DAX | Recalculadas em pandas (ver abaixo) |
 | Tema `EstudioCompetitivo.json` | CSS + template Plotly com a mesma paleta |
 
@@ -82,12 +82,13 @@ divergente do CSV); aqui usamos os dólares do CSV, então o Preço Médio exibi
 - Há também filtro por **gênero** e por **categoria** (40 valores, como
   `Single-player`, `Co-op`, `Steam Achievements`). Ambos vêm de listas, então
   um jogo com vários rótulos é contado em cada um dos filtros.
-- A tela **Exploração** traz a visão competitiva. Clicar em um ponto salva o
-  pub/dev em `st.session_state` e abre automaticamente a tela **Informações**.
-- A tela **Informações** mostra, juntos: a **pizza de composição**, a
-  **evolução dos lançamentos**, o **mapa de desempenho dos gêneros**, a
-  dispersão **popularidade/satisfação dos jogos**, os 6 KPIs e a tabela de
-  **dados brutos** (sem limite de jogos).
+- Tudo aparece em **uma única tela**, sem abas: a **visão competitiva** no
+  topo e, logo abaixo, a **pizza de composição**, a **evolução dos
+  lançamentos**, o **mapa de desempenho dos gêneros**, a dispersão
+  **popularidade/satisfação dos jogos**, os 6 KPIs e a tabela de **dados
+  brutos** (sem limite de jogos).
+- Clicar em qualquer gráfico salva o foco em `st.session_state` e atualiza
+  **todos** os painéis da mesma tela, sem troca de página.
 - Sem seleção nem filtro, composição e evolução são **gerais** (toda a base).
   Com qualquer filtro ou seleção, passam a mostrar o grupo em análise: pub/dev,
   gênero, categoria, ano ou jogo. Se o foco for um **jogo**, cada painel mostra
@@ -124,13 +125,9 @@ divergente do CSV); aqui usamos os dólares do CSV, então o Preço Médio exibi
   percentis 5 e 95 — sem isso quase todas as bolhas ficariam do mesmo tamanho.
 - O tempo médio de jogo é exibido em **horas** nos KPIs, tooltips e eixos.
 - Os demais filtros da sidebar (ano, gênero, categoria, preço, mínimo de
-  reviews, mínimo de % positivas e busca por nome) afetam todas as telas.
+  reviews, mínimo de % positivas e busca por nome) afetam todos os painéis.
 - O slider de reviews usa escala logarítmica para permitir selecionar desde
   poucas dezenas até milhões de avaliações.
-
-> Nota: a navegação usa `st.segmented_control` em vez de `st.tabs` porque o
-> Streamlit não permite trocar de aba programaticamente; assim o clique no
-> gráfico consegue abrir de fato a tela "Informações".
 
 ## Dados
 

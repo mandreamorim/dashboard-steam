@@ -20,7 +20,6 @@ import streamlit as st
 from preparar_dados import SAIDA, preparar
 
 BASE = Path(__file__).resolve().parent
-ABAS = ["Exploração", "Informações"]
 
 PALETA = [
     "#1F9D8F",  # teal
@@ -488,7 +487,7 @@ def pizza_portfolio(
 
 
 def callback_selecao(chave: str):
-    """Callback de on_select: grava o ponto clicado e abre as informações."""
+    """Callback de on_select: grava o ponto clicado como foco."""
 
     def _callback() -> None:
         estado = st.session_state.get(chave)
@@ -514,7 +513,6 @@ def callback_selecao(chave: str):
                 adicionar_exclusao(objeto)
             return
         st.session_state["selecionado"] = objeto
-        st.session_state["aba_ativa"] = "Informações"
 
     return _callback
 
@@ -582,9 +580,6 @@ if "jogos_excluidos" not in st.session_state:
     st.session_state["jogos_excluidos"] = []
 if "entidades_excluidas" not in st.session_state:
     st.session_state["entidades_excluidas"] = []
-# Sem `default` no widget: o callback de clique pode trocar a aba via Session State.
-if "aba_ativa" not in st.session_state:
-    st.session_state["aba_ativa"] = ABAS[0]
 
 base_completa = carregar_base()
 longas = carregar_tabelas_longas()
@@ -672,7 +667,7 @@ with st.sidebar:
     min_pct = st.slider("Mínimo de % avaliações positivas", 0, 100, 0, format="%d%%")
     busca = st.text_input("Busca por jogo", placeholder="Nome do jogo...")
     st.caption(
-        "Clique em qualquer gráfico: os painéis de Informações acompanham o foco."
+        "Clique em qualquer gráfico: todos os painéis acompanham o foco."
     )
     st.caption(
         f"Base: {fmt_int(len(base))} jogos · origem: "
@@ -840,302 +835,295 @@ elif tem_filtro:
 else:
     rotulo_grupo = "Todos os jogos"
 
-# -------------------------- navegação -------------------------------------
-aba = st.segmented_control("Tela", ABAS, key="aba_ativa", width="stretch")
-
-if aba == ABAS[0]:
-    # 1) Exploração ---------------------------------------------------------
-    st.header("Exploração")
+# -------------------------- painéis (tela única) ------------------------
+st.subheader("Visão competitiva")
+st.markdown(
+    '<div class="subtitulo">Todos os painéis ficam nesta mesma tela. Clique em '
+    'qualquer gráfico para trocar o foco: composição, evolução, distribuição, '
+    'KPIs e tabela bruta acompanham a seleção.</div>',
+    unsafe_allow_html=True,
+)
+with st.container(border=True):
     st.markdown(
-        '<div class="subtitulo">Escolha um pub/dev e clique: a tela '
-        '<b>Informações</b> abre com o portfólio, a evolução, os KPIs e os dados '
-        'daquele selecionado.</div>',
-        unsafe_allow_html=True,
+        "Qtd. de jogos × satisfação · tamanho = popularidade média (escala log)"
     )
+    competitivo = ent_agg_explorar.dropna(subset=["pct_positivas"])
+    grupos_comp = entidades_grafico(
+        competitivo, ent_col, 30,
+        [ent_foco] if selecao_entidade else entidades_sel,
+        "reviews",
+    )
+    fig = scatter_agrupado(
+        competitivo,
+        ent_col, "qtd_jogos", "pct_positivas", "popularidade",
+        tipo_entidade,
+        ("Qtd. de jogos", "% de avaliações positivas"),
+        grupos=grupos_comp,
+    )
+    desenhar_chart(fig, "chart_competitivo")
+
+st.caption(
+    "Clique em um ponto para trocar o foco de todos os painéis abaixo."
+)
+
+st.subheader("Painéis do grupo em análise")
+st.caption(
+    f"Grupo em análise: {rotulo_grupo} · {fmt_int(len(foco))} jogo(s) · "
+    f"modo: {modo_portfolio}."
+)
+if foco.empty:
+    st.info("Nenhum jogo no recorte atual. Ajuste os filtros na sidebar.")
+
+st.markdown(
+    '<div class="subtitulo">Composição, evolução, distribuição dos jogos, '
+    'KPIs e dados brutos — tudo do grupo selecionado ou filtrado.</div>',
+    unsafe_allow_html=True,
+)
+
+with st.expander("Como funciona e onde o gráfico é limitado"):
+    st.markdown(
+        """
+        **Pizza — composição do portfólio**
+        - Sem seleção nem filtro, mostra a distribuição **geral** de todos
+          os jogos. Com seleção ou filtro, mostra o grupo em análise
+          (pub/dev, gênero, categoria, ano ou jogo).
+        - Cada jogo entra **uma única vez**, pelo primeiro gênero listado
+          em `genres`; por isso as fatias somam 100% do grupo.
+        - A participação é: jogos daquele gênero / jogos distintos do grupo
+          **após todos os filtros**.
+        - Apenas os **8 gêneros** mais comuns têm fatia própria; os demais
+          são agrupados em "Outros". Jogos sem gênero ficam de fora.
+
+        **Linha — evolução dos lançamentos**
+        - No eixo X está o ano de lançamento; no eixo Y, a quantidade de
+          jogos lançados naquele ano.
+        - Sem filtro, a linha é **geral**. Com pub/dev selecionado, mostra
+          somente ele. Com outro filtro/seleção, mostra o grupo filtrado;
+          se for um jogo, vira um único ponto (o ano daquele lançamento).
+
+        **Distribuição dos jogos**
+        - O mapa de gêneros e a dispersão popularidade/satisfação usam os
+          mesmos jogos do grupo em análise. Se o foco for um jogo, cada
+          gráfico mostra apenas aquele título.
+        - Com **Modo exclusão** ligado, clicar em um jogo, pub ou dev
+          remove todos os jogos do grupo dos painéis. Sem o switch, use
+          **Excluir … em foco** após clicar. **Restaurar exclusões** na
+          sidebar desfaz isso.
+
+        **Limitações**
+        - Gênero e categoria são listas: um jogo pode pertencer a vários
+          gêneros/categorias nos filtros. A pizza evita a dupla contagem ao
+          usar só o gênero principal.
+        - Anos sem lançamento não viram ponto (não são zeros explícitos).
+        - Clique em uma fatia, ponto ou linha para trocar o foco.
+        """
+    )
+
+m = medidas(foco)
+colunas_kpi = st.columns(6, gap="small")
+for col, label, valor in zip(
+    colunas_kpi,
+    ["Qtd. jogos", "% avaliações positivas", "Qtd. reviews",
+     "Tempo médio de jogo", "Preço médio", "Popularidade estimada"],
+    [fmt_int(m["qtd_jogos"]), fmt_pct(m["pct_positivas"]), fmt_int(m["reviews"]),
+     f'{fmt_dec(m["playtime"] / 60)} h', f'US$ {fmt_dec(m["preco"])}',
+     fmt_int(m["popularidade"])],
+):
+    with col:
+        cartao(label, valor)
+
+col_pizza, col_linha = st.columns([1, 1.25])
+with col_pizza:
+    with st.container(border=True):
+        if modo_portfolio == "entidade":
+            ids_pizza = set(
+                long_foco_ent.loc[
+                    long_foco_ent[ent_col] == ent_foco, "appid"
+                ]
+            )
+            jogos_pizza = foco[foco["appid"].isin(ids_pizza)]
+            selecao_fatia = lambda genero: selecao_json(tipo_foco, ent_foco)
+            titulo_pizza = f"Composição do portfólio — {ent_foco}"
+        else:
+            jogos_pizza = foco
+            selecao_fatia = lambda genero: selecao_json("genero", genero)
+            titulo_pizza = (
+                "Composição dos portfólios"
+                if modo_portfolio == "geral"
+                else f"Composição — {rotulo_grupo}"
+            )
+        st.markdown(f"**{titulo_pizza}**  \nDistribuição dos gêneros principais")
+        fig_pizza, total_pizza = pizza_portfolio(jogos_pizza, selecao_fatia)
+        if total_pizza:
+            desenhar_chart(fig_pizza, "chart_portfolio_pizza", 430)
+        else:
+            st.info("Sem jogos com gênero no grupo em análise.")
+
+with col_linha:
     with st.container(border=True):
         st.markdown(
-            "**Visão competitiva**  \n"
-            "Qtd. de jogos × satisfação · tamanho = popularidade média (escala log)"
+            "**Evolução dos lançamentos**  \nAno de lançamento × quantidade de jogos"
         )
-        competitivo = ent_agg_explorar.dropna(subset=["pct_positivas"])
-        grupos_comp = entidades_grafico(
-            competitivo, ent_col, 30,
-            [ent_foco] if selecao_entidade else entidades_sel,
-            "reviews",
-        )
-        fig = scatter_agrupado(
-            competitivo,
-            ent_col, "qtd_jogos", "pct_positivas", "popularidade",
-            tipo_entidade,
-            ("Qtd. de jogos", "% de avaliações positivas"),
-            grupos=grupos_comp,
-        )
-        desenhar_chart(fig, "chart_competitivo")
+        lin = agregar(foco, "ano_lancamento").dropna(
+            subset=["ano_lancamento"]
+        ).sort_values("ano_lancamento")
+        nome_linha = ent_foco if modo_portfolio == "entidade" else rotulo_grupo
+        if modo_portfolio == "entidade":
+            custom_linha = [selecao_json(tipo_foco, ent_foco)] * len(lin)
+        else:
+            custom_linha = [
+                selecao_json("ano", int(a)) for a in lin["ano_lancamento"]
+            ]
 
-    st.caption(
-        "Clique em um ponto: a tela Informações passa a mostrar aquele pub/dev."
-    )
-
-else:
-    # 2) Informações --------------------------------------------------------
-    st.header("Informações")
-    st.caption(
-        f"Grupo em análise: {rotulo_grupo} · {fmt_int(len(foco))} jogo(s) · "
-        f"modo: {modo_portfolio}."
-    )
-    if foco.empty:
-        st.info("Nenhum jogo no recorte atual. Ajuste os filtros na sidebar.")
-
-    st.markdown(
-        '<div class="subtitulo">Composição, evolução, distribuição dos jogos, '
-        'KPIs e dados brutos — tudo do grupo selecionado ou filtrado.</div>',
-        unsafe_allow_html=True,
-    )
-
-    with st.expander("Como funciona e onde o gráfico é limitado"):
-        st.markdown(
-            """
-            **Pizza — composição do portfólio**
-            - Sem seleção nem filtro, mostra a distribuição **geral** de todos
-              os jogos. Com seleção ou filtro, mostra o grupo em análise
-              (pub/dev, gênero, categoria, ano ou jogo).
-            - Cada jogo entra **uma única vez**, pelo primeiro gênero listado
-              em `genres`; por isso as fatias somam 100% do grupo.
-            - A participação é: jogos daquele gênero / jogos distintos do grupo
-              **após todos os filtros**.
-            - Apenas os **8 gêneros** mais comuns têm fatia própria; os demais
-              são agrupados em "Outros". Jogos sem gênero ficam de fora.
-
-            **Linha — evolução dos lançamentos**
-            - No eixo X está o ano de lançamento; no eixo Y, a quantidade de
-              jogos lançados naquele ano.
-            - Sem filtro, a linha é **geral**. Com pub/dev selecionado, mostra
-              somente ele. Com outro filtro/seleção, mostra o grupo filtrado;
-              se for um jogo, vira um único ponto (o ano daquele lançamento).
-
-            **Distribuição dos jogos**
-            - O mapa de gêneros e a dispersão popularidade/satisfação usam os
-              mesmos jogos do grupo em análise. Se o foco for um jogo, cada
-              gráfico mostra apenas aquele título.
-            - Com **Modo exclusão** ligado, clicar em um jogo, pub ou dev
-              remove todos os jogos do grupo dos painéis. Sem o switch, use
-              **Excluir … em foco** após clicar. **Restaurar exclusões** na
-              sidebar desfaz isso.
-
-            **Limitações**
-            - Gênero e categoria são listas: um jogo pode pertencer a vários
-              gêneros/categorias nos filtros. A pizza evita a dupla contagem ao
-              usar só o gênero principal.
-            - Anos sem lançamento não viram ponto (não são zeros explícitos).
-            - Clique em uma fatia, ponto ou linha para trocar o foco.
-            """
-        )
-
-    m = medidas(foco)
-    colunas_kpi = st.columns(6, gap="small")
-    for col, label, valor in zip(
-        colunas_kpi,
-        ["Qtd. jogos", "% avaliações positivas", "Qtd. reviews",
-         "Tempo médio de jogo", "Preço médio", "Popularidade estimada"],
-        [fmt_int(m["qtd_jogos"]), fmt_pct(m["pct_positivas"]), fmt_int(m["reviews"]),
-         f'{fmt_dec(m["playtime"] / 60)} h', f'US$ {fmt_dec(m["preco"])}',
-         fmt_int(m["popularidade"])],
-    ):
-        with col:
-            cartao(label, valor)
-
-    col_pizza, col_linha = st.columns([1, 1.25])
-    with col_pizza:
-        with st.container(border=True):
-            if modo_portfolio == "entidade":
-                ids_pizza = set(
-                    long_foco_ent.loc[
-                        long_foco_ent[ent_col] == ent_foco, "appid"
-                    ]
-                )
-                jogos_pizza = foco[foco["appid"].isin(ids_pizza)]
-                selecao_fatia = lambda genero: selecao_json(tipo_foco, ent_foco)
-                titulo_pizza = f"Composição do portfólio — {ent_foco}"
-            else:
-                jogos_pizza = foco
-                selecao_fatia = lambda genero: selecao_json("genero", genero)
-                titulo_pizza = (
-                    "Composição dos portfólios"
-                    if modo_portfolio == "geral"
-                    else f"Composição — {rotulo_grupo}"
-                )
-            st.markdown(f"**{titulo_pizza}**  \nDistribuição dos gêneros principais")
-            fig_pizza, total_pizza = pizza_portfolio(jogos_pizza, selecao_fatia)
-            if total_pizza:
-                desenhar_chart(fig_pizza, "chart_portfolio_pizza", 430)
-            else:
-                st.info("Sem jogos com gênero no grupo em análise.")
-
-    with col_linha:
-        with st.container(border=True):
-            st.markdown(
-                "**Evolução dos lançamentos**  \nAno de lançamento × quantidade de jogos"
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=lin["ano_lancamento"].astype(int), y=lin["qtd_jogos"],
+                mode="lines+markers", name=str(nome_linha),
+                line=dict(width=3, color=PALETA[0]),
+                marker=dict(size=6, color=PALETA[0]),
+                customdata=custom_linha,
+                hovertemplate=(
+                    "<b>" + str(nome_linha) + "</b><br>Ano: %{x}<br>"
+                    "Qtd. jogos: %{y:,.0f}<extra></extra>"
+                ),
             )
-            lin = agregar(foco, "ano_lancamento").dropna(
-                subset=["ano_lancamento"]
-            ).sort_values("ano_lancamento")
-            nome_linha = ent_foco if modo_portfolio == "entidade" else rotulo_grupo
-            if modo_portfolio == "entidade":
-                custom_linha = [selecao_json(tipo_foco, ent_foco)] * len(lin)
-            else:
-                custom_linha = [
-                    selecao_json("ano", int(a)) for a in lin["ano_lancamento"]
-                ]
+        )
+        fig.update_layout(
+            xaxis_title="Ano de lançamento", yaxis_title="Qtd. de jogos"
+        )
+        desenhar_chart(estilo_fig(fig, 430), "chart_portfolio_linha")
+        if modo_portfolio == "entidade":
+            st.caption("A linha mostra somente o pub/dev selecionado.")
+        elif modo_portfolio == "geral":
+            st.caption("Linha geral: todos os jogos da base.")
+        else:
+            st.caption(f"Linha do grupo: {rotulo_grupo}.")
 
-            fig = go.Figure()
+col_generos, col_jogos = st.columns([1, 1.25])
+with col_generos:
+    with st.container(border=True):
+        st.markdown(
+            "**Mapa de desempenho dos gêneros**  \n"
+            "Tempo médio de jogo (h) × satisfação · tamanho = reviews (escala log)"
+        )
+        gen_agg = agregar(foco, "genero_principal").dropna(
+            subset=["pct_positivas", "playtime", "reviews"]
+        ).assign(playtime_h=lambda d: d["playtime"] / 60)
+        fig = scatter_agrupado(
+            gen_agg, "genero_principal", "playtime_h", "pct_positivas", "reviews",
+            "genero", ("Tempo médio de jogo (h)", "% de avaliações positivas"),
+            max_grupos=20,
+        )
+        desenhar_chart(fig, "chart_generos")
+
+with col_jogos:
+    with st.container(border=True):
+        st.markdown(
+            "**Popularidade e satisfação dos jogos**  \n"
+            "Cada ponto é um jogo · tamanho = % de avaliações positivas "
+            "(escala linear recortada entre o p5 e o p95)"
+        )
+        jogos = foco[
+            foco["estimated_owners_num"].notna()
+            & (foco["average_playtime_forever"] > 0)
+            & foco["num_reviews_total"].notna()
+            & foco["pct_pos_total"].notna()
+            & foco["name"].notna()
+        ].sort_values("num_reviews_total", ascending=False).head(2500)
+        fig = go.Figure()
+        if not jogos.empty:
+            pub_txt = jogos["publishers"].map(
+                lambda s: ", ".join(parse_lista(s)[:3]) or "—"
+            )
+            dev_txt = jogos["developers"].map(
+                lambda s: ", ".join(parse_lista(s)[:3]) or "—"
+            )
+            cores = [PALETA[i % len(PALETA)] for i in pd.factorize(jogos["name"])[0]]
+            custom = pd.DataFrame(
+                {
+                    "_sel": [selecao_json("jogo", int(a)) for a in jogos["appid"]],
+                    "nome": jogos["name"],
+                    "pub": pub_txt,
+                    "dev": dev_txt,
+                    "pct": jogos["pct_pos_total"],
+                    "reviews": jogos["num_reviews_total"],
+                    "pop": jogos["estimated_owners_num"],
+                    "play_h": jogos["average_playtime_forever"] / 60,
+                }
+            )
             fig.add_trace(
                 go.Scatter(
-                    x=lin["ano_lancamento"].astype(int), y=lin["qtd_jogos"],
-                    mode="lines+markers", name=str(nome_linha),
-                    line=dict(width=3, color=PALETA[0]),
-                    marker=dict(size=6, color=PALETA[0]),
-                    customdata=custom_linha,
-                    hovertemplate=(
-                        "<b>" + str(nome_linha) + "</b><br>Ano: %{x}<br>"
-                        "Qtd. jogos: %{y:,.0f}<extra></extra>"
+                    x=jogos["estimated_owners_num"],
+                    y=jogos["average_playtime_forever"] / 60,
+                    mode="markers",
+                    customdata=custom,
+                    marker=dict(
+                        size=tamanhos(
+                            jogos["pct_pos_total"], 34, min_px=12,
+                            escala=jogos["pct_pos_total"].quantile(0.95),
+                            base=jogos["pct_pos_total"].quantile(0.05),
+                            log=False,
+                        ),
+                        color=cores, opacity=0.7,
+                        line=dict(width=0.4, color="#FFFFFF"),
                     ),
+                    hovertemplate=(
+                        "<b>%{customdata[1]}</b><br>"
+                        "Publisher: %{customdata[2]}<br>"
+                        "Developer: %{customdata[3]}<br>"
+                        "% positivas: %{customdata[4]:.1%}<br>"
+                        "Reviews: %{customdata[5]:,.0f}<br>"
+                        "Popularidade: %{customdata[6]:,.0f}<br>"
+                        "Tempo médio: %{customdata[7]:.1f} h"
+                        "<extra></extra>"
+                    ),
+                    showlegend=False,
                 )
             )
-            fig.update_layout(
-                xaxis_title="Ano de lançamento", yaxis_title="Qtd. de jogos"
-            )
-            desenhar_chart(estilo_fig(fig, 430), "chart_portfolio_linha")
-            if modo_portfolio == "entidade":
-                st.caption("A linha mostra somente o pub/dev selecionado.")
-            elif modo_portfolio == "geral":
-                st.caption("Linha geral: todos os jogos da base.")
-            else:
-                st.caption(f"Linha do grupo: {rotulo_grupo}.")
-
-    col_generos, col_jogos = st.columns([1, 1.25])
-    with col_generos:
-        with st.container(border=True):
-            st.markdown(
-                "**Mapa de desempenho dos gêneros**  \n"
-                "Tempo médio de jogo (h) × satisfação · tamanho = reviews (escala log)"
-            )
-            gen_agg = agregar(foco, "genero_principal").dropna(
-                subset=["pct_positivas", "playtime", "reviews"]
-            ).assign(playtime_h=lambda d: d["playtime"] / 60)
-            fig = scatter_agrupado(
-                gen_agg, "genero_principal", "playtime_h", "pct_positivas", "reviews",
-                "genero", ("Tempo médio de jogo (h)", "% de avaliações positivas"),
-                max_grupos=20,
-            )
-            desenhar_chart(fig, "chart_generos")
-
-    with col_jogos:
-        with st.container(border=True):
-            st.markdown(
-                "**Popularidade e satisfação dos jogos**  \n"
-                "Cada ponto é um jogo · tamanho = % de avaliações positivas "
-                "(escala linear recortada entre o p5 e o p95)"
-            )
-            jogos = foco[
-                foco["estimated_owners_num"].notna()
-                & (foco["average_playtime_forever"] > 0)
-                & foco["num_reviews_total"].notna()
-                & foco["pct_pos_total"].notna()
-                & foco["name"].notna()
-            ].sort_values("num_reviews_total", ascending=False).head(2500)
-            fig = go.Figure()
-            if not jogos.empty:
-                pub_txt = jogos["publishers"].map(
-                    lambda s: ", ".join(parse_lista(s)[:3]) or "—"
-                )
-                dev_txt = jogos["developers"].map(
-                    lambda s: ", ".join(parse_lista(s)[:3]) or "—"
-                )
-                cores = [PALETA[i % len(PALETA)] for i in pd.factorize(jogos["name"])[0]]
-                custom = pd.DataFrame(
-                    {
-                        "_sel": [selecao_json("jogo", int(a)) for a in jogos["appid"]],
-                        "nome": jogos["name"],
-                        "pub": pub_txt,
-                        "dev": dev_txt,
-                        "pct": jogos["pct_pos_total"],
-                        "reviews": jogos["num_reviews_total"],
-                        "pop": jogos["estimated_owners_num"],
-                        "play_h": jogos["average_playtime_forever"] / 60,
-                    }
-                )
-                fig.add_trace(
-                    go.Scatter(
-                        x=jogos["estimated_owners_num"],
-                        y=jogos["average_playtime_forever"] / 60,
-                        mode="markers",
-                        customdata=custom,
-                        marker=dict(
-                            size=tamanhos(
-                                jogos["pct_pos_total"], 34, min_px=12,
-                                escala=jogos["pct_pos_total"].quantile(0.95),
-                                base=jogos["pct_pos_total"].quantile(0.05),
-                                log=False,
-                            ),
-                            color=cores, opacity=0.7,
-                            line=dict(width=0.4, color="#FFFFFF"),
-                        ),
-                        hovertemplate=(
-                            "<b>%{customdata[1]}</b><br>"
-                            "Publisher: %{customdata[2]}<br>"
-                            "Developer: %{customdata[3]}<br>"
-                            "% positivas: %{customdata[4]:.1%}<br>"
-                            "Reviews: %{customdata[5]:,.0f}<br>"
-                            "Popularidade: %{customdata[6]:,.0f}<br>"
-                            "Tempo médio: %{customdata[7]:.1f} h"
-                            "<extra></extra>"
-                        ),
-                        showlegend=False,
-                    )
-                )
-            fig.update_layout(
-                xaxis_title="Popularidade estimada (jogadores)",
-                yaxis_title="Tempo médio de jogo (h)",
-            )
-            desenhar_chart(estilo_fig(fig, 480), "chart_jogos")
-            st.caption(
-                "Esquerda abre o foco. Para excluir um outlier, ligue **Modo "
-                "exclusão** na sidebar e clique no ponto ou use **Excluir … em "
-                "foco** depois de clicar. Vale para jogos, publishers e "
-                "desenvolvedores."
-            )
-
-    with st.container(border=True):
-        st.markdown(
-            "**Dados brutos em detalhes**  \n"
-            "Todas as colunas do parquet, ordenadas por volume de avaliações"
+        fig.update_layout(
+            xaxis_title="Popularidade estimada (jogadores)",
+            yaxis_title="Tempo médio de jogo (h)",
         )
-        colunas = [
-            "name", "ano_lancamento", "genero_principal", "genres", "categories",
-            "developers", "publishers", "positive", "negative", "num_reviews_total",
-            "pct_pos_total", "num_reviews_recent", "pct_pos_recent", "price",
-            "estimated_owners_num", "average_playtime_forever", "appid",
-        ]
-        tabela = foco[colunas].copy()
-        tabela = tabela.sort_values("num_reviews_total", ascending=False)
+        desenhar_chart(estilo_fig(fig, 480), "chart_jogos")
         st.caption(
-            f"{fmt_int(len(tabela))} jogo(s) no foco · "
-            "campos de texto longo (descrições, histórias, screenshots) "
-            "não entram no parquet"
+            "Esquerda abre o foco. Para excluir um outlier, ligue **Modo "
+            "exclusão** na sidebar e clique no ponto ou use **Excluir … em "
+            "foco** depois de clicar. Vale para jogos, publishers e "
+            "desenvolvedores."
         )
-        tabela = tabela.rename(
-            columns={
-                "name": "Jogo", "ano_lancamento": "Ano",
-                "genero_principal": "Gênero principal", "genres": "Gêneros",
-                "categories": "Categorias", "developers": "Developers",
-                "publishers": "Publishers", "positive": "Positivas",
-                "negative": "Negativas", "num_reviews_total": "Reviews",
-                "pct_pos_total": "% positivas", "num_reviews_recent": "Reviews recentes",
-                "pct_pos_recent": "% positivas recentes", "price": "Preço (US$)",
-                "estimated_owners_num": "Popularidade",
-                "average_playtime_forever": "Tempo médio (min)", "appid": "AppID",
-            }
-        )
-        tabela["% positivas"] = tabela["% positivas"].map(fmt_pct)
-        tabela["% positivas recentes"] = tabela["% positivas recentes"].map(fmt_pct)
-        st.dataframe(tabela, hide_index=True, width="stretch", height=460)
+
+with st.container(border=True):
+    st.markdown(
+        "**Dados brutos em detalhes**  \n"
+        "Todas as colunas do parquet, ordenadas por volume de avaliações"
+    )
+    colunas = [
+        "name", "ano_lancamento", "genero_principal", "genres", "categories",
+        "developers", "publishers", "positive", "negative", "num_reviews_total",
+        "pct_pos_total", "num_reviews_recent", "pct_pos_recent", "price",
+        "estimated_owners_num", "average_playtime_forever", "appid",
+    ]
+    tabela = foco[colunas].copy()
+    tabela = tabela.sort_values("num_reviews_total", ascending=False)
+    st.caption(
+        f"{fmt_int(len(tabela))} jogo(s) no foco · "
+        "campos de texto longo (descrições, histórias, screenshots) "
+        "não entram no parquet"
+    )
+    tabela = tabela.rename(
+        columns={
+            "name": "Jogo", "ano_lancamento": "Ano",
+            "genero_principal": "Gênero principal", "genres": "Gêneros",
+            "categories": "Categorias", "developers": "Developers",
+            "publishers": "Publishers", "positive": "Positivas",
+            "negative": "Negativas", "num_reviews_total": "Reviews",
+            "pct_pos_total": "% positivas", "num_reviews_recent": "Reviews recentes",
+            "pct_pos_recent": "% positivas recentes", "price": "Preço (US$)",
+            "estimated_owners_num": "Popularidade",
+            "average_playtime_forever": "Tempo médio (min)", "appid": "AppID",
+        }
+    )
+    tabela["% positivas"] = tabela["% positivas"].map(fmt_pct)
+    tabela["% positivas recentes"] = tabela["% positivas recentes"].map(fmt_pct)
+    st.dataframe(tabela, hide_index=True, width="stretch", height=460)
