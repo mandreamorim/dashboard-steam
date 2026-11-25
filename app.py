@@ -449,7 +449,7 @@ def limpar_entidades() -> None:
 # App
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="Estúdio Competitivo", page_icon="🎮", layout="wide")
+st.set_page_config(page_title="Steam Dashboard", layout="wide")
 st.markdown(CSS, unsafe_allow_html=True)
 
 if "selecionado" not in st.session_state:
@@ -458,7 +458,7 @@ if "selecionado" not in st.session_state:
 base = carregar_base()
 longas = carregar_tabelas_longas()
 
-st.title("Estúdio Competitivo — jogos, editoras e jogadores")
+st.title("Steam Dashboard — jogos, editoras e jogadores")
 st.markdown(
     '<div class="subtitulo">Recriação interativa do relatório Power BI: '
     'desempenho, portfólio e mercado a partir dos dados originais do Steam.</div>',

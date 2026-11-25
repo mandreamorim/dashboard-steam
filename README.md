@@ -28,6 +28,11 @@ streamlit run app.py --server.port 8501
 
 Abra <http://localhost:8501>.
 
+**GitHub / Streamlit Community Cloud:** commite `data/jogos.parquet` (5 MB) e
+não o CSV original (447 MB, acima do limite de 100 MB do GitHub) nem o `.pbix`
+(só referência). O app roda apenas com o parquet; o CSV só é necessário para
+refazer `preparar_dados.py`, e pode ser baixado da fonte original em separado.
+
 Se o CSV estiver em outro lugar:
 
 ```bash
