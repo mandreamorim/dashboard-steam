@@ -86,6 +86,10 @@ def adicionar_exclusao(selecao: dict[str, Any]) -> None:
             entidades.append({"tipo": tipo, "valor": valor})
         st.session_state["entidades_excluidas"] = entidades
     st.session_state["selecionado"] = None
+    selecoes = dict(st.session_state.get("selecoes_clique", {}))
+    if selecoes.get(tipo) == valor:
+        selecoes.pop(tipo, None)
+    st.session_state["selecoes_clique"] = selecoes
 
 
 def callback_excluir_foco() -> None:
@@ -100,6 +104,36 @@ def callback_restaurar_exclusoes() -> None:
     st.session_state["jogos_excluidos"] = []
     st.session_state["entidades_excluidas"] = []
     st.session_state["selecionado"] = None
+
+
+def atualizar_selecao_composta(objeto: dict[str, Any]) -> bool:
+    """Acumula/retira filtros de clique por tipo (gênero, ano, pub/dev, jogo)."""
+    tipo = objeto.get("tipo")
+    valor = objeto.get("valor")
+    if tipo not in {"publisher", "developer", "genero", "ano", "jogo"}:
+        return False
+
+    selecoes = dict(st.session_state.get("selecoes_clique", {}))
+    if selecoes.get(tipo) == valor:
+        selecoes.pop(tipo, None)
+        ativo = False
+    else:
+        selecoes[tipo] = valor
+        ativo = True
+    st.session_state["selecoes_clique"] = selecoes
+    return ativo
+
+
+def remover_selecao_tipo(tipo: str) -> None:
+    """Remove apenas um filtro de clique específico (ex.: gênero ou ano)."""
+    selecoes = dict(st.session_state.get("selecoes_clique", {}))
+    if tipo in selecoes:
+        selecoes.pop(tipo, None)
+        st.session_state["selecoes_clique"] = selecoes
+
+    atual = st.session_state.get("selecionado")
+    if isinstance(atual, dict) and atual.get("tipo") == tipo:
+        st.session_state["selecionado"] = None
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +388,7 @@ def scatter_agrupado(
     titulos: tuple[str, str],
     max_grupos: int = 25,
     grupos: list[str] | None = None,
+    destaque: str | None = None,
 ) -> go.Figure:
     """Dispersão com uma série por entidade/gênero e seleção no clique."""
     if grupos is None:
@@ -374,6 +409,13 @@ def scatter_agrupado(
     fig = go.Figure()
     for i, nome in enumerate(grupos):
         g = agg[agg[grupo] == nome]
+        em_destaque = destaque is not None and str(nome) == str(destaque)
+        cor = (
+            PALETA[i % len(PALETA)]
+            if destaque is None or em_destaque
+            else "#B9C4CF"
+        )
+        opacidade = 0.84 if destaque is None or em_destaque else 0.35
         custom = pd.DataFrame(
             {
                 "_sel": [selecao_json(tipo, nome)] * len(g),
@@ -391,8 +433,9 @@ def scatter_agrupado(
                 customdata=custom,
                 marker=dict(
                     size=tamanhos(g[tamanho], escala=escala, base=base),
-                    color=PALETA[i % len(PALETA)],
-                    opacity=0.78, line=dict(width=0.5, color="#FFFFFF"),
+                    color=cor,
+                    opacity=opacidade,
+                    line=dict(width=0.5, color="#FFFFFF"),
                 ),
                 hovertemplate=(
                     "<b>%{customdata[1]}</b><br>"
@@ -414,12 +457,12 @@ def pizza_portfolio(
     selecao_por_fatia,
     top_n: int = 8,
 ) -> tuple[go.Figure, int]:
-    """Donut dos gêneros principais de um grupo de jogos.
+    """Composição dos gêneros principais em barras horizontais.
 
     Cada jogo entra **uma única vez**, pelo primeiro gênero da lista original.
-    Assim as fatias somam 100% do grupo, diferente da contagem por gênero (onde
+    Assim as barras somam 100% do grupo, diferente da contagem por gênero (onde
     um jogo com vários gêneros aparece em cada um deles). `selecao_por_fatia`
-    define o que é gravado no clique de cada fatia.
+    define o que é gravado no clique de cada barra.
     """
     jogos = jogos.dropna(subset=["genero_principal"])
     if jogos.empty:
@@ -435,28 +478,28 @@ def pizza_portfolio(
         )
     total = int(contagem.sum())
     rotulos = [str(g) for g in contagem.index]
-    custom = pd.DataFrame(
-        {
-            "_sel": [selecao_por_fatia(g) for g in rotulos],
-            "rotulo": rotulos,
-            "qtd": contagem.to_numpy(),
-            "pct": contagem.to_numpy() / total,
-        }
-    )
-    cores = [PALETA[i % len(PALETA)] for i in range(len(contagem))]
+    quantidades = contagem.to_numpy()
+    perc = quantidades / total
+    cores = [PALETA[i % len(PALETA)] for i in range(len(rotulos))]
     if "Outros" in rotulos:
         cores[rotulos.index("Outros")] = "#A9B6C3"
 
     fig = go.Figure(
-        go.Pie(
-            labels=rotulos,
-            values=contagem.to_numpy(),
-            customdata=custom,
-            hole=0.42,
-            sort=False,
-            textinfo="percent",
-            insidetextorientation="radial",
-            marker=dict(colors=cores, line=dict(width=1, color="#FFFFFF")),
+        go.Bar(
+            x=perc,
+            y=rotulos,
+            orientation="h",
+            marker=dict(color=cores, line=dict(width=0.5, color="#FFFFFF")),
+            customdata=np.column_stack(
+                [
+                    [selecao_por_fatia(g) for g in rotulos],
+                    rotulos,
+                    quantidades,
+                    perc,
+                ]
+            ),
+            text=[f"{p:.1%}" for p in perc],
+            textposition="outside",
             hovertemplate=(
                 "<b>%{customdata[1]}</b><br>"
                 "Jogos: %{customdata[2]:,.0f}<br>"
@@ -467,17 +510,11 @@ def pizza_portfolio(
     )
     fig = estilo_fig(fig, 430)
     fig.update_layout(
-        legend=dict(
-            orientation="v", yanchor="middle", y=0.5, x=1.01,
-            font=dict(size=10, color=CINZA), title=None,
-        ),
-        margin=dict(l=10, r=10, t=10, b=10),
+        showlegend=False,
+        margin=dict(l=20, r=20, t=10, b=20),
     )
-    fig.add_annotation(
-        x=0.5, y=0.5, showarrow=False,
-        text=f"<b>{total:,}</b><br>jogos".replace(",", "."),
-        font=dict(size=14, color=NAVY, family="Segoe UI"),
-    )
+    fig.update_xaxes(title_text="Participação", tickformat=".0%")
+    fig.update_yaxes(title_text="Gênero", autorange="reversed")
     return fig, total
 
 
@@ -507,38 +544,58 @@ def callback_selecao(chave: str):
         tipo = objeto.get("tipo")
         if tipo not in {"publisher", "developer", "genero", "ano", "jogo"}:
             return
-        if st.session_state.get("modo_exclusao"):
-            # Switch ligado: o clique vira exclusão, sem abrir foco.
-            if tipo in TIPOS_EXCLUIVEIS:
-                adicionar_exclusao(objeto)
-            return
-        st.session_state["selecionado"] = objeto
+        aplicar_objeto_selecao(objeto)
 
     return _callback
+
+
+def aplicar_objeto_selecao(objeto: dict[str, Any]) -> None:
+    """Aplica uma seleção vinda de qualquer gráfico (nativo ou componente)."""
+    tipo = objeto.get("tipo")
+    if tipo not in {"publisher", "developer", "genero", "ano", "jogo"}:
+        return
+    if st.session_state.get("modo_exclusao"):
+        if tipo in TIPOS_EXCLUIVEIS:
+            adicionar_exclusao(objeto)
+        return
+    ativo = atualizar_selecao_composta(objeto)
+    st.session_state["selecionado"] = objeto if ativo else None
 
 
 def aplicar_selecao(
     base: pd.DataFrame,
     longas: dict[str, pd.DataFrame],
-    selecao: dict | None,
+    selecoes: dict[str, Any] | None,
 ) -> pd.DataFrame:
-    """Reduz a base aos jogos da entidade/gênero/ano/jogo selecionado."""
-    if not selecao:
+    """Reduz a base aos jogos das seleções combinadas por clique (AND)."""
+    if not selecoes:
         return base
-    tipo, valor = selecao.get("tipo"), selecao.get("valor")
-    if tipo in {"publisher", "developer"}:
-        tabela = longas["publisher" if tipo == "publisher" else "developer"]
+
+    filtrada = base
+
+    for tipo in ("publisher", "developer"):
+        valor = selecoes.get(tipo)
+        if valor is None:
+            continue
+        tabela = longas[tipo]
         ids = tabela.loc[tabela["entidade"] == valor, "appid"].unique()
-        return base[base["appid"].isin(ids)]
-    if tipo == "genero":
+        filtrada = filtrada[filtrada["appid"].isin(ids)]
+
+    valor_genero = selecoes.get("genero")
+    if valor_genero is not None:
         tabela = longas["genero"]
-        ids = tabela.loc[tabela["genero"] == valor, "appid"].unique()
-        return base[base["appid"].isin(ids)]
-    if tipo == "ano":
-        return base[base["ano_lancamento"] == valor]
-    if tipo == "jogo":
-        return base[base["appid"] == valor]
-    return base
+        ids = tabela.loc[tabela["genero"] == valor_genero, "appid"].unique()
+        filtrada = filtrada[filtrada["appid"].isin(ids)]
+
+    valor_ano = selecoes.get("ano")
+    if valor_ano is not None:
+        filtrada = filtrada[filtrada["ano_lancamento"] == valor_ano]
+
+    valor_jogo = selecoes.get("jogo")
+    if valor_jogo is not None:
+        filtrada = filtrada[filtrada["appid"] == valor_jogo]
+
+    return filtrada
 
 
 def desenhar_chart(fig: go.Figure, chave: str, altura: int = 450) -> None:
@@ -565,6 +622,7 @@ def limpar_foco() -> None:
     """Trocar a visão limpa entidades e clique: os nomes são conjuntos distintos."""
     st.session_state["entidades_sel"] = []
     st.session_state["selecionado"] = None
+    st.session_state["selecoes_clique"] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -576,6 +634,8 @@ st.markdown(CSS, unsafe_allow_html=True)
 
 if "selecionado" not in st.session_state:
     st.session_state["selecionado"] = None
+if "selecoes_clique" not in st.session_state:
+    st.session_state["selecoes_clique"] = {}
 if "jogos_excluidos" not in st.session_state:
     st.session_state["jogos_excluidos"] = []
 if "entidades_excluidas" not in st.session_state:
@@ -714,6 +774,7 @@ with st.sidebar:
             on_click=callback_restaurar_exclusoes,
         )
 
+selecoes_clique = dict(st.session_state.get("selecoes_clique", {}))
 selecao = st.session_state["selecionado"]
 if entidades_sel:
     resumo = ", ".join(entidades_sel[:3]) + (
@@ -724,16 +785,42 @@ if entidades_sel:
         f'{visao.lower()}(s) em análise: {resumo}</span>',
         unsafe_allow_html=True,
     )
-if selecao:
+if selecoes_clique:
+    ordem = ["publisher", "developer", "genero", "ano", "jogo"]
+    partes = [
+        f"{tipo} · {selecoes_clique[tipo]}"
+        for tipo in ordem
+        if tipo in selecoes_clique
+    ]
     st.markdown(
-        f'<span class="selecao-chip">Foco: {selecao["tipo"]} · '
-        f'{selecao["valor"]}</span>',
+        f'<span class="selecao-chip">Foco(s): {" | ".join(partes)}</span>',
         unsafe_allow_html=True,
     )
+    rotulos_tipo = {
+        "publisher": "publisher",
+        "developer": "desenvolvedor",
+        "genero": "gênero",
+        "ano": "ano",
+        "jogo": "jogo",
+    }
+    ordem = ["publisher", "developer", "genero", "ano", "jogo"]
+    ativos = [tipo for tipo in ordem if tipo in selecoes_clique]
+    if ativos:
+        cols = st.columns(len(ativos), gap="small")
+        for col, tipo in zip(cols, ativos):
+            with col:
+                st.button(
+                    f"Remover {rotulos_tipo[tipo]}",
+                    key=f"remover_clique_{tipo}",
+                    on_click=remover_selecao_tipo,
+                    args=(tipo,),
+                    use_container_width=True,
+                )
     if st.button("Limpar clique", type="primary"):
         st.session_state["selecionado"] = None
+        st.session_state["selecoes_clique"] = {}
         st.rerun()
-    if selecao.get("tipo") in TIPOS_EXCLUIVEIS:
+    if selecao and selecao.get("tipo") in TIPOS_EXCLUIVEIS:
         tipo_foco = selecao["tipo"]
         st.button(
             ROTULO_EXCLUSAO[tipo_foco],
@@ -775,17 +862,24 @@ if busca.strip():
     mask &= base["name"].fillna("").str.contains(busca.strip(), case=False, regex=False)
 
 base_filtrada = base[mask].copy()  # recorte da sidebar, sem o clique
-foco = aplicar_selecao(base_filtrada, longas, selecao)  # o clique sempre comanda
+foco = aplicar_selecao(base_filtrada, longas, selecoes_clique)  # cliques combinados
 
-ids_explorar = set(base_filtrada["appid"])
+# O competitivo acompanha filtros e também cliques de gênero/ano/jogo.
+# Quando o clique é em pub/dev, o competitivo mantém a comparação entre
+# entidades e só destaca a entidade escolhida.
+base_competitiva = base_filtrada
+if any(t in selecoes_clique for t in {"genero", "ano", "jogo"}):
+    base_competitiva = foco
+
+ids_explorar = set(base_competitiva["appid"])
 ids_foco = set(foco["appid"])
 
 long_explorar = longas[tipo_entidade]
 long_explorar = long_explorar[long_explorar["appid"].isin(ids_explorar)].copy()
 
-selecao_entidade = (
-    selecao if selecao and selecao.get("tipo") in {"publisher", "developer"} else None
-)
+selecao_entidade = None
+if tipo_entidade in selecoes_clique:
+    selecao_entidade = {"tipo": tipo_entidade, "valor": selecoes_clique[tipo_entidade]}
 if selecao_entidade:
     ent_foco = str(selecao_entidade["valor"])
     tipo_foco = selecao_entidade["tipo"]
@@ -805,7 +899,7 @@ long_foco_ent = long_foco_ent[long_foco_ent["appid"].isin(ids_foco)].copy()
 ent_agg_explorar = agregar(long_explorar, ent_col)
 
 tem_filtro = bool(
-    selecao
+    selecoes_clique
     or entidades_sel
     or generos_sel
     or categorias_sel
@@ -821,13 +915,19 @@ modo_portfolio = (
 )
 if selecao_entidade:
     rotulo_grupo = f"{tipo_foco}: {ent_foco}"
-elif selecao and selecao.get("tipo") == "jogo":
-    appid_sel = selecao.get("valor")
+elif "jogo" in selecoes_clique:
+    appid_sel = selecoes_clique.get("jogo")
     nomes_jogo = base.loc[base["appid"] == appid_sel, "name"].dropna()
     nome_jogo = str(nomes_jogo.iloc[0]) if len(nomes_jogo) else str(appid_sel)
     rotulo_grupo = f"Jogo: {nome_jogo}"
-elif selecao:
-    rotulo_grupo = f"{selecao['tipo']}: {selecao['valor']}"
+elif selecoes_clique:
+    ordem = ["genero", "ano", "publisher", "developer"]
+    rotulos = [
+        f"{tipo}: {selecoes_clique[tipo]}"
+        for tipo in ordem
+        if tipo in selecoes_clique
+    ]
+    rotulo_grupo = " + ".join(rotulos)
 elif appids_excluidos:
     rotulo_grupo = f"Recorte filtrado ({fmt_int(n_excluidos)} jogo(s) excluído(s))"
 elif tem_filtro:
@@ -859,6 +959,7 @@ with st.container(border=True):
         tipo_entidade,
         ("Qtd. de jogos", "% de avaliações positivas"),
         grupos=grupos_comp,
+        destaque=ent_foco if selecao_entidade else None,
     )
     desenhar_chart(fig, "chart_competitivo")
 
@@ -942,7 +1043,7 @@ with col_pizza:
                 ]
             )
             jogos_pizza = foco[foco["appid"].isin(ids_pizza)]
-            selecao_fatia = lambda genero: selecao_json(tipo_foco, ent_foco)
+            selecao_fatia = lambda genero: selecao_json("genero", genero)
             titulo_pizza = f"Composição do portfólio — {ent_foco}"
         else:
             jogos_pizza = foco
